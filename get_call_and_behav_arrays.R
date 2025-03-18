@@ -106,7 +106,8 @@ for(i in 1:nrow(calls)){
   ind_idx <- calls$ind_idx[i]
   call_type <- calls$callType[i]
   time_idx <- calls$time_idx[i]
-  if(!is.na(ind_idx) & !is.na(call_type) & call_type %in% call_types){
+  foc <- calls$focalType[i]
+  if(!is.na(ind_idx) & !is.na(call_type) & call_type %in% call_types & foc == 'F'){
     calls_array[ind_idx, time_idx, call_type] <- calls_array[ind_idx, time_idx, call_type] + 1
   }
 }
