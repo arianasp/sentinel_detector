@@ -2,21 +2,10 @@
 #
 #The detector uses ONLY audio labels to (attempt to) detect bouts of sentinel behavior
 #
-#As a start, we simply remove the ACC-based requirements of the first pass sentinel detector
-#
-#For each time point, we look in a time window t_window (currently 31 seconds) centered on that time point
-#and count up how many (focal) sn's and cc's the individual produced, then normalize this to calculate the call rate for each call type.
-#
-#We then define an individual as being in the "sentinel" state at time t if:
-#1. The individual's call rate for sn's in the time window exceeds min_sn_thresh (here set to 0 - so the individual has to give at least 1 short note)
-#2. The individual's call rate for cc's in the time window falls below max_cc_thresh (here set to 0.001 meaning no cc's are allowed)
-#
-#Once we have cateogrized each time point at being in the "sentinel" state or not, we 
-#find contiguous bouts of sentinel states for each individual. 
-#The resulting bouts are stored in the data frame sentinel_bouts, with onset and offset times (t0 and tf)
-#correspoding to the beginning of the first time window and the end of the last time window 
-#
-#Finally, we connect adjacent bouts to one another if they are less than max_time_connect_bouts time apart
+#The detector first detects strings of sn-containing seconds that are separated by a maximum
+#gap of max_sn_gap_len (=60 sec). It then filters to only sequences with at least min_sns_in_seq (=10)
+#It filters out sequences shorter than min_dur (=120 s)
+#Finally, it filters out sequences that contain more than max_cc_rate (=0.01) cc-containing seconds
 
 library(lubridate)
 
