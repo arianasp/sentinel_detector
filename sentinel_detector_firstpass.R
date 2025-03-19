@@ -19,15 +19,17 @@
 #
 #Finally, we connect adjacent bouts to one another if they are less than max_time_connect_bouts time apart
 
+library(lubridate)
+
 #-----PARAMS-----
 #input data file
 infile <- '/mnt/EAS_shared/meerkat/working/processed/combined/ZU_2021_allstreams.RData'
 
 #where to save the output table
-outfile <- '/mnt/EAS_ind/astrandburg/sentinel_detector/first_pass_sentinel_bouts_2025-03-18.csv'
+outfile <- '/mnt/EAS_ind/astrandburg/sentinel_detector/first_pass_sentinel_bouts_2025-03-19_vig_thresh_0.85.csv'
 
 #detecting whether an individual is a sentinel at any given time point
-vig_frac_thresh <- 0.95 #minimum fraction of the time window that has to be designated as vigilant for the individual to be able to be sentinel
+vig_frac_thresh <- 0.85 #minimum fraction of the time window that has to be designated as vigilant for the individual to be able to be sentinel
 max_cc_thresh <- 0.001 #maximum fraction of cc's within a time window to allow the individual to be designated as sentinel
 min_sn_thresh <- 0 #minimum fraction of sn's within a time window to consider an individual as sentinel
 
@@ -97,7 +99,7 @@ sentinel_bouts$wav <- calls$wavFileName[match(sentinel_bouts$ind_date, calls$ind
 #find the time of the first call during the bout, in the audio file
 #then use this to calculate the start time of the bout of sentinel-like behavior
 calls$t0_UTC <- as.POSIXct(calls$t0GPS_UTC, tz = 'UTC')
-sentinel_bouts$tf_file <- sentinel_bouts$t0_file <- seconds_to_period(0)
+sentinel_bouts$tf_file <- sentinel_bouts$t0_file <- lubridate::seconds_to_period(0)
 for(i in 1:nrow(sentinel_bouts)){
   wav <- sentinel_bouts$wav[i]
   t0 <- sentinel_bouts$t0_UTC[i]
@@ -135,5 +137,17 @@ for(i in 1:length(inds)){
   
 }
 
+sentinel_bouts_connected$dur <- sentinel_bouts_connected$tf - sentinel_bouts_connected$t0
+
 #save output
 write.csv(sentinel_bouts_connected, file = outfile, quote = F, row.names = F)
+
+#make plot
+i <- 9
+cocomo::plot_behav_and_calls(behavs, calls_array, behavs_key,
+                             focal_ind = sentinel_bouts_connected$ind[i],
+                             t0 = sentinel_bouts_connected$t0[i],
+                             tf = sentinel_bouts_connected$tf[i],
+                             nonfocal_calls_to_plot <- c('cc','sn','al'),
+                             nonfocal_behavs_to_plot = c('Vigilance'),
+                             smooth_window = params$time_window)
