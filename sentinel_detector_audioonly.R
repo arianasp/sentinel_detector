@@ -11,10 +11,10 @@ library(lubridate)
 
 #-----PARAMS-----
 #input data file
-infile <- '/mnt/EAS_shared/meerkat/working/processed/combined/ZU_2021_allstreams.RData'
+infile <- '~/Desktop/Meerkat_data_for_hackathon/processed_data/ZU_2021_allstreams.RData'
 
 #where to save the output table
-outfile <- '/mnt/EAS_ind/astrandburg/sentinel_detector/audio_only_sentinel_bouts_2025-03-19.csv'
+outfile <- '~/Desktop/Meerkat_data_for_hackathon/results/audio_only_sentinel_bouts_2025-03-20.csv'
 
 #detecting whether an individual is a sentinel at any given time point
 max_sn_gap_len <- 60
@@ -103,14 +103,31 @@ for(i in 1:nrow(sentinel_bouts)){
   sentinel_bouts$tf_file[i] <- lubridate::seconds_to_period(bout_start_time_in_wav_file + sentinel_bouts$tf[i] - sentinel_bouts$t0[i])
 }
 
+#i <- 11
+# cocomo::plot_behav_and_calls(behavs, calls_array, behavs_key,
+#                              focal_ind = sentinel_bouts$ind[i],
+#                              t0 = sentinel_bouts$t0[i],
+#                              tf = sentinel_bouts$tf[i],
+#                              nonfocal_calls_to_plot <- c('cc','sn','al'),
+#                              nonfocal_behavs_to_plot = c('Vigilance'),
+#                              smooth_window = params$time_window)
+
+#DISTANCE MOVED
+
+sentinel_bouts$dist_spread <- NA
+for(i in 1:nrow(sentinel_bouts)){
+  x <- xs[cbind(sentinel_bouts$ind[i], sentinel_bouts$t0[i]:sentinel_bouts$tf[i])]
+  y <- ys[cbind(sentinel_bouts$ind[i], sentinel_bouts$t0[i]:sentinel_bouts$tf[i])]
+  centr_x <- mean(x, na.rm=T)
+  centr_y <- mean(y, na.rm=T)
+  sentinel_bouts$dist_spread[i] <- mean(sqrt((x - centr_x)^2 + (y - centr_y)^2),na.rm=T)
+  
+}
+
+row <- 50
+plot(xs[sentinel_bouts$ind[row],sentinel_bouts$t0[row]:sentinel_bouts$tf[row]],
+        ys[sentinel_bouts$ind[row],sentinel_bouts$t0[row]:sentinel_bouts$tf[row]],asp=1)
+
 #save output
 write.csv(sentinel_bouts, file = outfile, quote = F, row.names = F)
 
-i <- 11
-cocomo::plot_behav_and_calls(behavs, calls_array, behavs_key,
-                             focal_ind = sentinel_bouts$ind[i],
-                             t0 = sentinel_bouts$t0[i],
-                             tf = sentinel_bouts$tf[i],
-                             nonfocal_calls_to_plot <- c('cc','sn','al'),
-                             nonfocal_behavs_to_plot = c('Vigilance'),
-                             smooth_window = params$time_window)
