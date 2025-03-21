@@ -1,10 +1,12 @@
 #Second pass at a sentinel detector - audio only
 #
-#The detector uses ONLY audio labels to (attempt to) detect bouts of sentinel behavior
+#The detector uses audio labels and gps to (attempt to) detect bouts of sentinel behavior
 #
 #The detector first detects strings of sn-containing seconds that are separated by a maximum
 #gap of max_sn_gap_len (=60 sec). It then filters to only sequences with at least min_sns_in_seq (=10)
-#It filters out sequences shorter than min_dur (=120 s)
+#Next, it checks the gps data. It filters out any periods where the displacement over a minute goes over a threshold (uses a double threshold method to get contiguous bouts)
+#and breaks any sequences that were interrupted by these high speed periods into multiple sequences.
+#From the resulting sequences, it filters out those shorter than min_dur (=120 s)
 #Finally, it filters out sequences that contain more than max_cc_rate (=0.01) cc-containing seconds
 
 library(lubridate)
@@ -14,13 +16,16 @@ library(lubridate)
 infile <- '~/Desktop/Meerkat_data_for_hackathon/processed_data/ZU_2021_allstreams.RData'
 
 #where to save the output table
-outfile <- '~/Desktop/Meerkat_data_for_hackathon/results/audio_only_sentinel_bouts_2025-03-20.csv'
+outfile <- '~/Desktop/Meerkat_data_for_hackathon/results/audio_only_sentinel_bouts_2025-03-21_gpssplit.csv'
 
 #detecting whether an individual is a sentinel at any given time point
 max_sn_gap_len <- 60
 min_sns_in_seq <- 10
 min_dur <- 120 #minimum (time) duration
 max_cc_rate <- .01 #maximum rate of ccs 
+speed_dt <- 60 #time window for computing speed (rolling window centered on timestep) - must be even
+speed_thresh_upper <- 10 #threshold for determining if a period of movement is to be excluded (in m / min)
+speed_thresh_lower <- 5 #threshold for finding the edges of periods of movement (in m / min)
 
 #-----LOAD DATA-----
 load(infile)
@@ -66,15 +71,64 @@ for(i in 1:n_inds){
 #filter to only sequences with at least min_sns_in_seq short notes
 sn_seqs <- sn_seqs[which(sn_seqs$n >= min_sns_in_seq),]
 
-#count up the rate of close calls during the sequence time
-sn_seqs$dur <- sn_seqs$tf - sn_seqs$t0
+#If there is any movement in these sequences, remove periods above a threshold speed (double threhsold method used to identify contiguous high-speed chunks of time)
+sentinel_bouts <- data.frame()
 for(i in 1:nrow(sn_seqs)){
-  sn_seqs$ccs[i] <- sum(calls_array[sn_seqs$ind[i], sn_seqs$t0[i]:sn_seqs$tf[i],'cc'],na.rm=T)
+  ind <- sn_seqs$ind[i]
+  t0 <- sn_seqs$t0[i]
+  tf <- sn_seqs$tf[i]
+  
+  #if too near start, can't compute speed - skip the speed check
+  if(t0 - speed_dt/2 <= 0){
+    sentinel_bouts <- rbind(sentinel_bouts, data.frame(ind = ind, t0 = t0, tf = tf))
+    next
+  }
+  
+  x_past <- xs[ind,(t0-speed_dt/2):(tf-speed_dt/2)]
+  y_past <- ys[ind,(t0-speed_dt/2):(tf-speed_dt/2)]
+  x_fut <- xs[ind, (t0+speed_dt/2):(tf + speed_dt / 2)]
+  y_fut <- ys[ind, (t0+speed_dt/2):(tf + speed_dt / 2)]
+  speed <- sqrt((x_fut - x_past)^2 + (y_fut - y_past)^2) / speed_dt * 60 #speed in m / min
+  
+  #if there are any NAs skip the speed check
+  if(sum(is.na(speed)>0)){
+    sentinel_bouts <- rbind(sentinel_bouts, data.frame(ind = ind, t0 = t0, tf = tf))
+    next
+  }
+  above_upper <- speed > speed_thresh_upper
+  above_lower <- speed > speed_thresh_lower
+  too_fast <- cocomo::get_together_sticky(above_upper, above_lower) #use double threshold to pull out times that are too fast
+  
+  #if there are no periods of fast movement found, just keep the bout whole
+  if(sum(too_fast)==0){
+    sentinel_bouts <- rbind(sentinel_bouts, data.frame(ind = ind, t0 = t0, tf = tf))
+    next
+  }
+  subbouts_rle <- rle(too_fast)
+  idxs_ends <- cumsum(subbouts_rle$lengths)
+  idxs_starts <- c(1,idxs_ends+1)[1:(length(idxs_ends))] 
+  subbouts <- data.frame(start = idxs_starts, end = idxs_ends, val = subbouts_rle$values)
+  subbouts <- subbouts[which(subbouts$val==FALSE),] #subset to bouts below the speed threshold
+  subbouts$start <- subbouts$start + t0 - 1
+  subbouts$end <- subbouts$end + t0 - 1
+  sentinel_bouts_new <- data.frame(ind = rep(ind,nrow(subbouts)), t0 = subbouts$start, tf = subbouts$end)
+  sentinel_bouts <- rbind(sentinel_bouts, sentinel_bouts_new)
+      
 }
-sn_seqs$cc_rate <- sn_seqs$ccs / sn_seqs$dur
+
+#count up the number of sns, rate of sns, and rate of close calls during the sequence time
+sentinel_bouts$dur <- sentinel_bouts$tf - sentinel_bouts$t0
+sentinel_bouts$sns <- NA
+sentinel_bouts$ccs <- NA
+for(i in 1:nrow(sentinel_bouts)){
+  sentinel_bouts$sns[i] <- sum(calls_array[sentinel_bouts$ind[i], sentinel_bouts$t0[i]:sentinel_bouts$tf[i],'sn'],na.rm=T)
+  sentinel_bouts$ccs[i] <- sum(calls_array[sentinel_bouts$ind[i], sentinel_bouts$t0[i]:sentinel_bouts$tf[i],'cc'],na.rm=T)
+}
+sentinel_bouts$sn_rate <- sentinel_bouts$sns / sentinel_bouts$dur
+sentinel_bouts$cc_rate <- sentinel_bouts$ccs / sentinel_bouts$dur
 
 #filter to minimum duration and max cc rate
-sentinel_bouts <- sn_seqs[which(sn_seqs$dur > min_dur & sn_seqs$cc_rate < max_cc_rate),]
+sentinel_bouts <- sentinel_bouts[which(sentinel_bouts$dur > min_dur & sentinel_bouts$cc_rate < max_cc_rate),]
 
 #some additional basic information
 sentinel_bouts$id_code <- ids$id_code[sentinel_bouts$ind]
@@ -103,6 +157,18 @@ for(i in 1:nrow(sentinel_bouts)){
   sentinel_bouts$tf_file[i] <- lubridate::seconds_to_period(bout_start_time_in_wav_file + sentinel_bouts$tf[i] - sentinel_bouts$t0[i])
 }
 
+#compute rates of other call types
+sentinel_bouts$al_rate <- sentinel_bouts$soc_rate <- sentinel_bouts$agg_rate <- NA
+for(i in 1:nrow(sentinel_bouts)){
+  ind <- sentinel_bouts$ind[i]
+  t0 <- sentinel_bouts$t0[i]
+  tf <- sentinel_bouts$tf[i]
+  dur <- sentinel_bouts$dur[i]
+  sentinel_bouts$al_rate[i] <- sum(calls_array[ind,t0:tf,'al'], na.rm=T) / dur
+  sentinel_bouts$soc_rate[i] <- sum(calls_array[ind,t0:tf,'soc'], na.rm=T) / dur
+  sentinel_bouts$agg_rate[i] <- sum(calls_array[ind,t0:tf,'agg'], na.rm=T) / dur
+}
+
 #i <- 11
 # cocomo::plot_behav_and_calls(behavs, calls_array, behavs_key,
 #                              focal_ind = sentinel_bouts$ind[i],
@@ -113,7 +179,6 @@ for(i in 1:nrow(sentinel_bouts)){
 #                              smooth_window = params$time_window)
 
 #DISTANCE MOVED
-
 sentinel_bouts$dist_spread <- NA
 for(i in 1:nrow(sentinel_bouts)){
   x <- xs[cbind(sentinel_bouts$ind[i], sentinel_bouts$t0[i]:sentinel_bouts$tf[i])]
@@ -124,9 +189,15 @@ for(i in 1:nrow(sentinel_bouts)){
   
 }
 
-row <- 50
-plot(xs[sentinel_bouts$ind[row],sentinel_bouts$t0[row]:sentinel_bouts$tf[row]],
-        ys[sentinel_bouts$ind[row],sentinel_bouts$t0[row]:sentinel_bouts$tf[row]],asp=1)
+#BREAKING INTO BOUTS BASED ON DISTANCE MOVED
+
+#plot(t0:tf,speed)
+#abline(v=subbouts$start,col='green')
+#abline(v=subbouts$end,col='red')
+
+#row <- 50
+#plot(xs[sentinel_bouts$ind[row],sentinel_bouts$t0[row]:sentinel_bouts$tf[row]],
+#        ys[sentinel_bouts$ind[row],sentinel_bouts$t0[row]:sentinel_bouts$tf[row]],asp=1)
 
 #save output
 write.csv(sentinel_bouts, file = outfile, quote = F, row.names = F)
